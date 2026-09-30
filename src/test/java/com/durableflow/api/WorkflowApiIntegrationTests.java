@@ -27,6 +27,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.json.JsonMapper;
 
 import com.durableflow.workflow.WorkflowModels.CreateRunRequest;
+import com.durableflow.workflow.WorkflowModels.AttemptResponse;
 import com.durableflow.workflow.WorkflowModels.CreateWorkflowRequest;
 import com.durableflow.workflow.WorkflowModels.RunResponse;
 import com.durableflow.workflow.WorkflowModels.TaskDefinition;
@@ -87,6 +88,37 @@ class WorkflowApiIntegrationTests {
         assertThat(jdbc.queryForObject(
                 "SELECT count(*) FROM execution_events WHERE workflow_run_id = ?", Long.class, run.id()))
                 .isEqualTo(4L);
+    }
+
+    @Test
+    void readsSavedAttemptsInAttemptOrderWithOutputsAndFailureDetails() throws Exception {
+        var workflow = createWorkflow();
+        var submitted = send("POST", "/workflows/" + workflow.id() + "/runs", null);
+        var run = json.readValue(submitted.body(), RunResponse.class);
+        var taskId = run.tasks().getFirst().id();
+        jdbc.update("""
+                INSERT INTO task_attempts
+                    (id, task_run_id, attempt_number, status, output, finished_at)
+                VALUES (?, ?, 2, 'SUCCEEDED', '{"value":"ok"}'::jsonb, CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), taskId);
+        jdbc.update("""
+                INSERT INTO task_attempts
+                    (id, task_run_id, attempt_number, status, error_type, error_message, finished_at)
+                VALUES (?, ?, 1, 'FAILED', 'DEMO_FAILURE', 'First attempt failed', CURRENT_TIMESTAMP)
+                """, UUID.randomUUID(), taskId);
+
+        var response = send("GET", "/tasks/" + taskId + "/attempts", null);
+        assertThat(response.statusCode()).isEqualTo(200);
+        var attempts = json.readValue(response.body(), AttemptResponse[].class);
+        assertThat(attempts).extracting(AttemptResponse::attemptNumber).containsExactly(1, 2);
+        assertThat(attempts[0].taskId()).isEqualTo(taskId);
+        assertThat(attempts[0].status()).isEqualTo("FAILED");
+        assertThat(attempts[0].errorType()).isEqualTo("DEMO_FAILURE");
+        assertThat(attempts[0].errorMessage()).isEqualTo("First attempt failed");
+        assertThat(attempts[0].output()).isNull();
+        assertThat(attempts[1].status()).isEqualTo("SUCCEEDED");
+        assertThat(attempts[1].output()).isEqualTo(Map.of("value", "ok"));
+        assertThat(attempts[1].finishedAt()).isAfterOrEqualTo(attempts[1].startedAt());
     }
 
     @Test
