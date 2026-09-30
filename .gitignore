@@ -1,1 +1,18 @@
 PLAN.md
+CONTRIBUTING.md
+
+# Build output and local tooling
+target/
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+.cache/
+
+# Local secrets and logs
+.env
+.env.*
+!.env.example
+*.log
