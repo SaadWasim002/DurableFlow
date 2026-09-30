@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: durableflow
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+server:
+  address: 127.0.0.1
+  port: ${PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
