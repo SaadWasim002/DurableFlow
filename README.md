@@ -2,7 +2,7 @@
 
 A workflow execution engine built incrementally with Java and Spring Boot.
 
-DurableFlow has a runnable HTTP application, local PostgreSQL, and a versioned schema for workflow execution state. Workflow APIs and task execution will be added next.
+DurableFlow supports creating validated linear workflows, creating queued runs, and reading their tasks and attempts through REST APIs. Definitions and execution state are stored in local PostgreSQL. Sequential task execution is the next feature.
 
 ## Requirements
 
@@ -50,7 +50,18 @@ All paths use the application port (8080 by default). Spring Boot Actuator provi
 
 Overall health returns HTTP 200 with `"status":"UP"` when healthy and HTTP 503 when PostgreSQL is unavailable. Database failure checks can take up to the pool's connection timeout. Health details and credentials are not included in the response.
 
-The liveness and readiness groups reflect application availability; this configuration does not add PostgreSQL to the readiness group. Use overall health when checking database connectivity. Workflow creation, execution, and history endpoints belong to the next feature.
+The liveness and readiness groups reflect application availability; this configuration does not add PostgreSQL to the readiness group. Use overall health when checking database connectivity.
+
+| Method and path | Purpose | Success |
+| --- | --- | --- |
+| `POST /workflows` | Create an immutable workflow version | 201 |
+| `GET /workflows/{id}` | Read its definition | 200 |
+| `POST /workflows/{id}/runs` | Create a queued run and its task records | 202 |
+| `GET /runs/{id}` | Read the run and its tasks | 200 |
+| `GET /runs/{id}/tasks` | Read tasks in dependency order | 200 |
+| `GET /tasks/{id}/attempts` | Read attempts; currently empty until execution arrives | 200 |
+
+Follow the [complete API walkthrough](docs/API.md) for PowerShell requests, response fields, validation rules, and errors. A ready-to-submit workflow lives in [three-task-chain.json](examples/workflows/three-task-chain.json). Accepted runs remain `QUEUED` in this feature; the executor arrives next.
 
 ## Build and run the JAR
 
@@ -59,9 +70,9 @@ The liveness and readiness groups reflect application availability; this configu
 java -jar target/durableflow-0.0.1-SNAPSHOT.jar
 ```
 
-`verify` runs the persistence integration tests and packages the application. Tests use Testcontainers to create an isolated PostgreSQL 17 container with a random host port, apply the real migrations, and remove the test container afterward. Docker must be running; the Compose development database does not need to be running for tests. Test data is kept separate from your development database.
+`verify` runs unit and integration tests and packages the application. Integration tests use Testcontainers to create isolated PostgreSQL 17 containers with random host ports, apply the real migrations, and remove the test containers afterward. Docker must be running; the Compose development database does not need to be running for tests. Test data is kept separate from your development database.
 
-The nine tests cover UTC connections, migration reapplication, saved execution results, uniqueness, foreign-key ownership, and rollback of state/history changes together. Starting the JAR requires the Compose database to be running.
+The 46 tests cover graph/reference validation, UTC connections, migrations, saved results, uniqueness, HTTP responses, populated attempt history, concurrent duplicate requests, and rollback of a run/tasks/history after a late insert failure. Starting the JAR requires the Compose database to be running.
 
 On Linux or macOS, use `./mvnw` instead of `.\mvnw.cmd`.
 
@@ -98,7 +109,7 @@ Use your configured username/database if you override the defaults.
 | `task_attempts` | Separate execution attempts, including output and errors |
 | `execution_events` | Status-change history linked to the correct run/task/attempt |
 
-UUIDs identify records; timestamps use `TIMESTAMPTZ`. The application sets its default timezone to UTC before Spring Boot starts, so database connections and default time calculations are independent of the machine's timezone. The schema enforces valid initial states, positive attempt/version numbers, and unique task keys/attempt numbers. Workflow graph validation and controlled state transitions will be implemented with the workflow API and executor.
+UUIDs identify records; timestamps use `TIMESTAMPTZ`. The application sets its default timezone to UTC before Spring Boot starts, so database connections and default time calculations are independent of the machine's timezone. The schema enforces valid initial states, positive attempt/version numbers, and unique task keys/attempt numbers. The API validates linear graphs and input references. Execution state transitions arrive with the executor.
 
 Flyway is the only schema initialization mechanism. Add new `V2__...sql`, `V3__...sql` migrations for future changes; do not edit a migration after it has been applied to a database you intend to keep. Flyway validates migration checksums during startup.
 
@@ -111,11 +122,17 @@ compose.yaml                                 Local PostgreSQL and persistent vol
 mvnw / mvnw.cmd                              Maven launchers
 src/main/java/com/durableflow/
     DurableFlowApplication.java              Spring Boot entry point
+    workflow/                                Models, validation, service, and JDBC repository
+    api/                                     REST endpoints and Problem Details errors
 src/main/resources/application.yaml          Local server and health settings
 src/main/resources/db/migration/              Versioned Flyway SQL migrations
 src/test/java/com/durableflow/persistence/     PostgreSQL integration tests
+src/test/java/com/durableflow/workflow/        Graph validation and transaction tests
+src/test/java/com/durableflow/api/             HTTP API integration tests
+examples/workflows/                          Example workflow JSON
+docs/API.md                                 API contract and walkthrough
 ```
 
-Import `pom.xml` into your Java IDE and use `DurableFlowApplication` as the run configuration. Workflow APIs, scheduling, and execution will be introduced in subsequent features.
+Import `pom.xml` into your Java IDE and use `DurableFlowApplication` as the run configuration. Scheduling and execution will be introduced in subsequent features.
 
 Each feature uses a descriptive branch such as `feat/project-setup`, with a handful of focused commits. Development and verification run locally.

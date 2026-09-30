@@ -1,0 +1,23 @@
+{
+  "name": "report-demo",
+  "version": 1,
+  "tasks": [
+    {
+      "id": "prepare",
+      "type": "echo",
+      "input": { "message": "Hello DurableFlow" }
+    },
+    {
+      "id": "format",
+      "type": "echo",
+      "dependsOn": ["prepare"],
+      "input": { "previous": { "$ref": "prepare.output" } }
+    },
+    {
+      "id": "save",
+      "type": "echo",
+      "dependsOn": ["format"],
+      "input": { "previous": { "$ref": "format.output" } }
+    }
+  ]
+}
