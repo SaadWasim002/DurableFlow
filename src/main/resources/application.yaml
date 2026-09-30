@@ -3,6 +3,18 @@ spring:
     name: durableflow
   lifecycle:
     timeout-per-shutdown-phase: 20s
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:127.0.0.1}:${DB_PORT:5433}/${DB_NAME:durableflow}
+    username: ${DB_USERNAME:durableflow}
+    password: ${DB_PASSWORD:durableflow_dev}
+    hikari:
+      maximum-pool-size: 5
+  sql:
+    init:
+      mode: never
+  flyway:
+    validate-on-migrate: true
+    clean-disabled: true
 
 server:
   address: 127.0.0.1
