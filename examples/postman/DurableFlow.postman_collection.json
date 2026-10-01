@@ -1,0 +1,273 @@
+{
+  "info": {
+    "name": "DurableFlow — Local API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Start local PostgreSQL and DurableFlow, then run requests in order. Collection variables capture workflowId, runId, and taskId from successful responses. Each Create workflow request generates a unique name. Runs currently remain QUEUED; attempts are empty until execution is implemented. No authentication required."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8080",
+      "type": "string"
+    },
+    {
+      "key": "workflowId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "runId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taskId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Overall health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/health/liveness"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/health/readiness"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Workflow and run walkthrough",
+      "item": [
+        {
+          "name": "Create workflow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"report-demo-{{$guid}}\",\n  \"version\": 1,\n  \"tasks\": [\n    {\n      \"id\": \"prepare\",\n      \"type\": \"echo\",\n      \"input\": {\n        \"message\": \"Hello DurableFlow\"\n      }\n    },\n    {\n      \"id\": \"format\",\n      \"type\": \"echo\",\n      \"dependsOn\": [\n        \"prepare\"\n      ],\n      \"input\": {\n        \"previous\": {\n          \"$ref\": \"prepare.output\"\n        }\n      }\n    },\n    {\n      \"id\": \"save\",\n      \"type\": \"echo\",\n      \"dependsOn\": [\n        \"format\"\n      ],\n      \"input\": {\n        \"previous\": {\n          \"$ref\": \"format.output\"\n        }\n      }\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/workflows"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set(\"workflowId\", pm.response.json().id);",
+                  "    pm.collectionVariables.unset(\"runId\");",
+                  "    pm.collectionVariables.unset(\"taskId\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get workflow",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/workflows/{{workflowId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input\": {\n    \"reportName\": \"demo\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/workflows/{{workflowId}}/runs"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 202\", function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "if (pm.response.code === 202) {",
+                  "    const run = pm.response.json();",
+                  "    pm.collectionVariables.set(\"runId\", run.id);",
+                  "    pm.collectionVariables.unset(\"taskId\");",
+                  "    if (run.tasks.length > 0) pm.collectionVariables.set(\"taskId\", run.tasks[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get run",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/runs/{{runId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get run tasks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/runs/{{runId}}/tasks"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    const tasks = pm.response.json();",
+                  "    if (tasks.length > 0) pm.collectionVariables.set(\"taskId\", tasks[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get task attempts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{taskId}}/attempts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

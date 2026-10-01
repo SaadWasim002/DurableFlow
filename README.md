@@ -63,6 +63,8 @@ The liveness and readiness groups reflect application availability; this configu
 
 Follow the [complete API walkthrough](docs/API.md) for PowerShell requests, response fields, validation rules, and errors. A ready-to-submit workflow lives in [three-task-chain.json](examples/workflows/three-task-chain.json). Accepted runs remain `QUEUED` in this feature; the executor arrives next.
 
+Import the [Postman collection](examples/postman/DurableFlow.postman_collection.json) to try every endpoint with automatically saved IDs. The walkthrough also includes [curl commands](docs/API.md#curl-commands-powershell).
+
 ## Build and run the JAR
 
 ```powershell

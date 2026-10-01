@@ -2,6 +2,48 @@
 
 Base URL: `http://127.0.0.1:8080`. Start PostgreSQL and the application using the README instructions. Send JSON bodies with `Content-Type: application/json`.
 
+## Postman collection
+
+Import [DurableFlow.postman_collection.json](../examples/postman/DurableFlow.postman_collection.json) into Postman using **Import → Files**. No environment or authentication is needed. The collection variable `baseUrl` defaults to `http://127.0.0.1:8080`; change it if you use another port.
+
+Run the requests in their saved order, either individually or using the Collection Runner. The collection includes all six workflow/run/task endpoints and all three health endpoints. Successful creation responses automatically save `workflowId`, `runId`, and the first task's `taskId` as collection variables. Each workflow creation uses a unique name so rerunning the collection avoids a name/version conflict. Each request checks its expected HTTP status.
+
+To inspect another task, change the collection's `taskId` to that task's UUID from **Get run tasks**. Runs currently stay `QUEUED`, and **Get task attempts** returns `[]`.
+
+## curl commands (PowerShell)
+
+Run these from the repository directory after starting the application. Use `curl.exe` explicitly in Windows PowerShell. Set the IDs below from the preceding responses; the Postman collection captures them automatically.
+
+```powershell
+$baseUrl = 'http://127.0.0.1:8080'
+
+# Health endpoints
+curl.exe -i "$baseUrl/actuator/health"
+curl.exe -i "$baseUrl/actuator/health/liveness"
+curl.exe -i "$baseUrl/actuator/health/readiness"
+
+# Create a workflow (201); copy its response id into workflowId
+curl.exe -i -X POST "$baseUrl/workflows" -H "Content-Type: application/json" --data-binary '@examples/workflows/three-task-chain.json'
+$workflowId = 'PASTE_WORKFLOW_UUID'
+
+# Read the workflow (200)
+curl.exe -i "$baseUrl/workflows/$workflowId"
+
+# Create a run (202); copy its response id into runId
+curl.exe -i -X POST "$baseUrl/workflows/$workflowId/runs" -H "Content-Type: application/json" --data-binary '@examples/workflows/run-input.json'
+$runId = 'PASTE_RUN_UUID'
+
+# Read the run and its tasks (200)
+curl.exe -i "$baseUrl/runs/$runId"
+curl.exe -i "$baseUrl/runs/$runId/tasks"
+
+# Copy a task's id (UUID, not taskKey) from the tasks response
+$taskId = 'PASTE_TASK_UUID'
+curl.exe -i "$baseUrl/tasks/$taskId/attempts"
+```
+
+The curl workflow file has the fixed name `report-demo`, version `1`. Creating it again returns 409; reuse its workflow UUID or edit the file's name/version. On Linux/macOS, use `curl` instead of `curl.exe` and assign shell variables with `baseUrl='...'`, `workflowId='...'`, `runId='...'`, and `taskId='...'`.
+
 This feature creates immutable workflow versions and queued runs. Runs remain `QUEUED` until the sequential executor is introduced. Task types `echo`, `sleep`, and `fail` are accepted for the upcoming built-in handlers.
 
 ## 1. Create a workflow
