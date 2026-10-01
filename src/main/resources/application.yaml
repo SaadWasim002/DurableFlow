@@ -1,6 +1,10 @@
 spring:
   application:
     name: durableflow
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+      accept-float-as-int: false
   lifecycle:
     timeout-per-shutdown-phase: 20s
   datasource:
