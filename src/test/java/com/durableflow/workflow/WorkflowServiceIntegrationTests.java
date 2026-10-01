@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
+        properties = "durableflow.execution.enabled=false",
         useMainMethod = SpringBootTest.UseMainMethod.ALWAYS)
 class WorkflowServiceIntegrationTests {
     @Container
