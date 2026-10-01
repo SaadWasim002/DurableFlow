@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
+        properties = "durableflow.execution.enabled=false",
         useMainMethod = SpringBootTest.UseMainMethod.ALWAYS)
 class PersistenceIntegrationTests {
 
@@ -43,8 +44,8 @@ class PersistenceIntegrationTests {
     }
 
     @Test
-    void appliesInitialMigrationAndDoesNotReapplyIt() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+    void appliesMigrationsAndDoesNotReapplyThem() {
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         assertThat(jdbc.queryForObject("""
                 SELECT count(*) FROM information_schema.tables

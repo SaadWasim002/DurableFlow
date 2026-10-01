@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.durableflow.workflow.WorkflowExceptions.Conflict;
@@ -55,13 +56,13 @@ public class WorkflowService {
         return RunResponse.from(run, repository.findTasks(run.id()));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public RunResponse getRun(UUID id) {
         var run = repository.findRun(id).orElseThrow(() -> new NotFound("Run not found: " + id));
         return RunResponse.from(run, repository.findTasks(id));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public List<TaskResponse> getTasks(UUID runId) {
         return getRun(runId).tasks();
     }
