@@ -2,7 +2,7 @@
 
 A workflow execution engine built incrementally with Java and Spring Boot.
 
-DurableFlow supports creating validated linear workflows, creating queued runs, and reading their tasks and attempts through REST APIs. Definitions and execution state are stored in local PostgreSQL. Sequential task execution is the next feature.
+DurableFlow creates and executes validated linear workflows using one background worker. Local PostgreSQL stores definitions, runs, task outputs, attempts, and transition history. REST APIs let you submit work and inspect its saved results.
 
 ## Requirements
 
@@ -59,9 +59,9 @@ The liveness and readiness groups reflect application availability; this configu
 | `POST /workflows/{id}/runs` | Create a queued run and its task records | 202 |
 | `GET /runs/{id}` | Read the run and its tasks | 200 |
 | `GET /runs/{id}/tasks` | Read tasks in dependency order | 200 |
-| `GET /tasks/{id}/attempts` | Read attempts; currently empty until execution arrives | 200 |
+| `GET /tasks/{id}/attempts` | Read attempts, resolved input, outputs, and errors | 200 |
 
-Follow the [complete API walkthrough](docs/API.md) for PowerShell requests, response fields, validation rules, and errors. A ready-to-submit workflow lives in [three-task-chain.json](examples/workflows/three-task-chain.json). Accepted runs remain `QUEUED` in this feature; the executor arrives next.
+Follow the [complete API walkthrough](docs/API.md) for requests, response fields, validation rules, and errors. The [execution walkthrough](docs/EXECUTION.md) demonstrates success, failure, saved attempts, and restart behaviour. Try [three-task-chain.json](examples/workflows/three-task-chain.json) or [failing-chain.json](examples/workflows/failing-chain.json). Accepted runs start `QUEUED`, then execute automatically.
 
 Import the [Postman collection](examples/postman/DurableFlow.postman_collection.json) to try every endpoint with automatically saved IDs. The walkthrough also includes [curl commands](docs/API.md#curl-commands-powershell).
 
@@ -74,7 +74,13 @@ java -jar target/durableflow-0.0.1-SNAPSHOT.jar
 
 `verify` runs unit and integration tests and packages the application. Integration tests use Testcontainers to create isolated PostgreSQL 17 containers with random host ports, apply the real migrations, and remove the test containers afterward. Docker must be running; the Compose development database does not need to be running for tests. Test data is kept separate from your development database.
 
-The 46 tests cover graph/reference validation, UTC connections, migrations, saved results, uniqueness, HTTP responses, populated attempt history, concurrent duplicate requests, and rollback of a run/tasks/history after a late insert failure. Starting the JAR requires the Compose database to be running.
+The 65 tests cover graph/reference validation, UTC connections, migrations, saved results, uniqueness, HTTP responses, concurrent requests/claims, actual background execution, resolved attempt inputs, stop-on-failure, duplicate outcome protection, and transaction rollback. Starting the JAR requires the Compose database to be running.
+
+## Execution behaviour
+
+The worker executes one task at a time, polling PostgreSQL with a default 250 ms delay after each task/poll. A successful task makes its successor ready. A failed task stops the run and marks unstarted tasks `SKIPPED`. The built-in handlers are `echo` (return input), `sleep` (wait `millis`, default 1000, maximum 60000), and `fail` (record a deliberate error). Input references are resolved from saved run input and successful upstream outputs.
+
+Set `EXECUTION_ENABLED=false` to run the API without executing tasks. `EXECUTION_POLL_DELAY_MS` changes the polling delay. Use one enabled application instance for this feature. Queued/ready work resumes after restart; interrupted `RUNNING` attempts require the lease recovery feature planned later. See [execution details and configuration](docs/EXECUTION.md).
 
 On Linux or macOS, use `./mvnw` instead of `.\mvnw.cmd`.
 
@@ -111,9 +117,9 @@ Use your configured username/database if you override the defaults.
 | `task_attempts` | Separate execution attempts, including output and errors |
 | `execution_events` | Status-change history linked to the correct run/task/attempt |
 
-UUIDs identify records; timestamps use `TIMESTAMPTZ`. The application sets its default timezone to UTC before Spring Boot starts, so database connections and default time calculations are independent of the machine's timezone. The schema enforces valid initial states, positive attempt/version numbers, and unique task keys/attempt numbers. The API validates linear graphs and input references. Execution state transitions arrive with the executor.
+UUIDs identify records; timestamps use `TIMESTAMPTZ`. The application sets its default timezone to UTC before Spring Boot starts. The schema enforces valid states, positive attempt/version numbers, and unique task keys/attempt numbers. The API validates linear graphs and input references. Task claims and outcomes save state transitions and history in short transactions; handlers execute outside those transactions. V2 adds indexes for polling active work.
 
-Flyway is the only schema initialization mechanism. Add new `V2__...sql`, `V3__...sql` migrations for future changes; do not edit a migration after it has been applied to a database you intend to keep. Flyway validates migration checksums during startup.
+Flyway is the only schema initialization mechanism. Add new `V3__...sql`, `V4__...sql` migrations for future changes; do not edit a migration after it has been applied to a database you intend to keep. Flyway validates migration checksums during startup.
 
 ## Project layout
 
@@ -126,15 +132,19 @@ src/main/java/com/durableflow/
     DurableFlowApplication.java              Spring Boot entry point
     workflow/                                Models, validation, service, and JDBC repository
     api/                                     REST endpoints and Problem Details errors
+    execution/                               Polling worker, handlers, claims, and outcomes
 src/main/resources/application.yaml          Local server and health settings
 src/main/resources/db/migration/              Versioned Flyway SQL migrations
 src/test/java/com/durableflow/persistence/     PostgreSQL integration tests
 src/test/java/com/durableflow/workflow/        Graph validation and transaction tests
 src/test/java/com/durableflow/api/             HTTP API integration tests
+src/test/java/com/durableflow/execution/       Handler, transaction, and background execution tests
 examples/workflows/                          Example workflow JSON
+examples/postman/                            Importable Postman collection
 docs/API.md                                 API contract and walkthrough
+docs/EXECUTION.md                           Execution flow and success/failure demos
 ```
 
-Import `pom.xml` into your Java IDE and use `DurableFlowApplication` as the run configuration. Scheduling and execution will be introduced in subsequent features.
+Import `pom.xml` into your Java IDE and use `DurableFlowApplication` as the run configuration. General DAG dependencies and parallel execution are the next milestones.
 
 Each feature uses a descriptive branch such as `feat/project-setup`, with a handful of focused commits. Development and verification run locally.
