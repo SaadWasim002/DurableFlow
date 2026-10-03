@@ -2,7 +2,7 @@
   "info": {
     "name": "DurableFlow — Local API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Start local PostgreSQL and DurableFlow, then run requests in order. Collection variables capture workflowId, runId, and taskId from successful responses. Each Create workflow request generates a unique name. Runs currently remain QUEUED; attempts are empty until execution is implemented. No authentication required."
+    "description": "Start local PostgreSQL and DurableFlow, then run requests in order. Successful responses save IDs automatically. Workflow names are unique. The worker executes tasks asynchronously; repeat Get run until SUCCEEDED or FAILED, then inspect attempts. The failure demo saves separate IDs. No authentication required."
   },
   "variable": [
     {
@@ -22,6 +22,21 @@
     },
     {
       "key": "taskId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "failureWorkflowId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "failureRunId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "failureTaskId",
       "value": "",
       "type": "string"
     }
@@ -96,7 +111,7 @@
       ]
     },
     {
-      "name": "Workflow and run walkthrough",
+      "name": "Success walkthrough",
       "item": [
         {
           "name": "Create workflow",
@@ -205,7 +220,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/runs/{{runId}}"
+            "url": "{{baseUrl}}/runs/{{runId}}",
+            "description": "Repeat until status is SUCCEEDED or FAILED."
           },
           "event": [
             {
@@ -252,6 +268,135 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/tasks/{{taskId}}/attempts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Failure walkthrough",
+      "description": "Run requests in order. Repeat Get failed run until FAILED. Expect prepare SUCCEEDED, format FAILED, save SKIPPED. The failed attempt shows DEMO_FAILURE.",
+      "item": [
+        {
+          "name": "Create failing workflow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/workflows",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"failure-demo-{{$guid}}\",\n  \"version\": 1,\n  \"tasks\": [\n    {\n      \"id\": \"prepare\",\n      \"type\": \"echo\",\n      \"input\": {\n        \"message\": \"Prepare report\"\n      }\n    },\n    {\n      \"id\": \"format\",\n      \"type\": \"fail\",\n      \"dependsOn\": [\n        \"prepare\"\n      ],\n      \"input\": {\n        \"message\": \"Demo formatting failure\"\n      }\n    },\n    {\n      \"id\": \"save\",\n      \"type\": \"echo\",\n      \"dependsOn\": [\n        \"format\"\n      ],\n      \"input\": {\n        \"previous\": {\n          \"$ref\": \"format.output\"\n        }\n      }\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set(\"failureWorkflowId\", pm.response.json().id);",
+                  "    pm.collectionVariables.unset(\"failureRunId\");",
+                  "    pm.collectionVariables.unset(\"failureTaskId\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create failing run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/workflows/{{failureWorkflowId}}/runs",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 202\", function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "if (pm.response.code === 202) {",
+                  "    const run = pm.response.json();",
+                  "    pm.collectionVariables.set(\"failureRunId\", run.id);",
+                  "    const task = run.tasks.find(item => item.taskKey === \"format\");",
+                  "    if (task) pm.collectionVariables.set(\"failureTaskId\", task.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get failed run",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/runs/{{failureRunId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get failed task attempts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{failureTaskId}}/attempts"
           },
           "event": [
             {

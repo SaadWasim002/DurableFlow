@@ -38,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "durableflow.execution.enabled=false",
         useMainMethod = SpringBootTest.UseMainMethod.ALWAYS)
 class WorkflowApiIntegrationTests {
     @Container

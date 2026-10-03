@@ -8,7 +8,7 @@ Import [DurableFlow.postman_collection.json](../examples/postman/DurableFlow.pos
 
 Run the requests in their saved order, either individually or using the Collection Runner. The collection includes all six workflow/run/task endpoints and all three health endpoints. Successful creation responses automatically save `workflowId`, `runId`, and the first task's `taskId` as collection variables. Each workflow creation uses a unique name so rerunning the collection avoids a name/version conflict. Each request checks its expected HTTP status.
 
-To inspect another task, change the collection's `taskId` to that task's UUID from **Get run tasks**. Runs currently stay `QUEUED`, and **Get task attempts** returns `[]`.
+To inspect another task, change the collection's `taskId` to that task's UUID from **Get run tasks**. Runs execute automatically; repeat **Get run** until it is terminal, then inspect attempts. The failure folder saves separate IDs so you can compare success and failure.
 
 ## curl commands (PowerShell)
 
@@ -44,7 +44,7 @@ curl.exe -i "$baseUrl/tasks/$taskId/attempts"
 
 The curl workflow file has the fixed name `report-demo`, version `1`. Creating it again returns 409; reuse its workflow UUID or edit the file's name/version. On Linux/macOS, use `curl` instead of `curl.exe` and assign shell variables with `baseUrl='...'`, `workflowId='...'`, `runId='...'`, and `taskId='...'`.
 
-This feature creates immutable workflow versions and queued runs. Runs remain `QUEUED` until the sequential executor is introduced. Task types `echo`, `sleep`, and `fail` are accepted for the upcoming built-in handlers.
+The API creates immutable workflow versions and runs that execute in the background. Task types `echo`, `sleep`, and `fail` have working local handlers. See [the execution walkthrough](EXECUTION.md) for their input contract, success/failure demos, and restart limitations.
 
 ## 1. Create a workflow
 
@@ -79,7 +79,7 @@ Input references use an object containing only `$ref`:
 {"previous": {"$ref": "prepare.output"}}
 ```
 
-The referenced task must be upstream in the chain. `{"$ref":"run.input"}` refers to the complete run input. References may appear inside nested objects or arrays. They are stored and validated now; the executor will resolve them later. Field-path references such as `prepare.output.message` are not supported yet.
+The referenced task must be upstream in the chain. `{"$ref":"run.input"}` refers to the complete run input. References may appear inside nested objects or arrays. The worker resolves them from stored run input and successful upstream outputs, saving resolved input on the attempt. Field-path references such as `prepare.output.message` are not supported yet.
 
 The response contains `id`, `name`, `version`, normalized `tasks`, and `createdAt`. The UUID identifies this particular version. The same name can have another version with a different UUID; existing versions are preserved. Repeating the example with the same name and version returns **409 Conflict**. Reuse its saved ID or change the name/version for another definition.
 
@@ -113,7 +113,7 @@ In one transaction, this request saves:
 
 If any write fails, all these writes roll back together. No attempt is created before actual execution. Every accepted POST creates a separate run; request idempotency keys arrive in a later feature.
 
-The response contains `id`, `workflowId`, `status`, `input`, `createdAt`, `startedAt`, `finishedAt`, and `tasks`. For this feature, execution timestamps and outputs remain null.
+The response contains `id`, `workflowId`, `status`, `input`, `createdAt`, `startedAt`, `finishedAt`, and `tasks`. The POST returns the initial queued snapshot with null execution timestamps/outputs. Subsequent GET requests show progress and results.
 
 ## 4. Read a run
 
@@ -123,7 +123,7 @@ The response contains `id`, `workflowId`, `status`, `input`, `createdAt`, `start
 Invoke-RestMethod -Uri "$baseUrl/runs/$($run.id)" | ConvertTo-Json -Depth 20
 ```
 
-For the example, expect run status `QUEUED` and task states `READY`, `PENDING`, `PENDING`. The endpoint reads PostgreSQL, so the same IDs remain queryable after application restart.
+Immediately after submission, the run may be `QUEUED` or `RUNNING`. Repeat this request until it is `SUCCEEDED` or `FAILED`. The success example ends with all three tasks `SUCCEEDED` and saved outputs. The endpoint reads a consistent PostgreSQL snapshot, so the same IDs remain queryable after application restart.
 
 ## 5. Read the run's tasks
 
@@ -145,7 +145,7 @@ $taskId = $tasks[0].id
 Invoke-RestMethod -Uri "$baseUrl/tasks/$taskId/attempts"
 ```
 
-Use the task-run UUID, not the definition key. The HTTP response is `[]` until the executor creates an attempt. An unknown task returns 404, which distinguishes missing tasks from known tasks with no attempts.
+Use the task-run UUID, not the definition key. The HTTP response is `[]` before the worker claims the task, or when a task is skipped without starting. A claimed task has attempt 1, initially `RUNNING`, then `SUCCEEDED` or `FAILED`. An unknown task returns 404, which distinguishes missing tasks from known tasks with no attempts.
 
 When attempts exist, each contains `id`, `taskId`, `attemptNumber`, `status`, `input`, `output`, `errorType`, `errorMessage`, `startedAt`, and `finishedAt`.
 
@@ -170,6 +170,6 @@ Errors use Spring's Problem Details JSON format (`application/problem+json`). Fo
 | 409 | Workflow name/version already exists, including concurrent requests |
 | 500 | Database operation failed; SQL details are logged, not returned |
 
-Run/task writes and events are transactional. Definition validation happens before a definition is written. Detailed history querying, retries, cancellation, scheduling, and execution are later features.
+Run/task writes and events are transactional. Definition validation happens before a definition is written. Detailed event-history querying, retries, cancellation, and scheduled execution are later features. Handler failures appear on a failed run/attempt; the accepted POST remains HTTP 202.
 
 See the README for the existing health endpoints. The application remains local to `127.0.0.1`.

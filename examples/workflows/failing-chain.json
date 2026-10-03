@@ -1,0 +1,23 @@
+{
+  "name": "failure-demo",
+  "version": 1,
+  "tasks": [
+    {
+      "id": "prepare",
+      "type": "echo",
+      "input": { "message": "Prepare report" }
+    },
+    {
+      "id": "format",
+      "type": "fail",
+      "dependsOn": ["prepare"],
+      "input": { "message": "Demo formatting failure" }
+    },
+    {
+      "id": "save",
+      "type": "echo",
+      "dependsOn": ["format"],
+      "input": { "previous": { "$ref": "format.output" } }
+    }
+  ]
+}
