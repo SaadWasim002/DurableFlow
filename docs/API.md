@@ -60,18 +60,18 @@ $workflow = Invoke-RestMethod -Method Post -Uri "$baseUrl/workflows" `
 $workflow | ConvertTo-Json -Depth 20
 ```
 
-The example defines `prepare -> format -> save`. Each task has:
+The chain example defines `prepare -> format -> save`. For a branching example, see the [DAG walkthrough](DAG.md). Each task has:
 
 | Field | Meaning |
 | --- | --- |
 | `id` | Unique key within this workflow; starts with a letter, then letters/digits/underscores/hyphens |
 | `type` | `echo`, `sleep`, or `fail` |
-| `dependsOn` | An array containing its parent's task key; omitted or empty for the root |
+| `dependsOn` | An array of parent task keys; omitted or empty for a root |
 | `input` | A JSON object; defaults to `{}` |
 
-Workflow `name` is required, trimmed, and limited to 200 characters. `version` is a required positive integer. Supply 1-100 tasks, with task IDs no longer than 200 characters. One task or one connected linear chain is supported. Tasks may be submitted in any array order; the saved response orders them by dependency.
+Workflow `name` is required, trimmed, and limited to 200 characters. `version` is a required positive integer. Supply 1-100 tasks, with task IDs no longer than 200 characters. DAGs with branches, joins, multiple roots, and independent components are supported. Tasks may be submitted in any array order; the saved response orders them by dependency.
 
-Validation rejects duplicate IDs, self/missing dependencies, cycles, disconnected chains, branching, multiple parents, and unsupported types. Unknown request fields and fractional versions are rejected instead of silently accepted.
+Validation rejects duplicate task IDs, duplicate parents, self/missing dependencies, cycles, and unsupported types. Unknown request fields and fractional versions are rejected instead of silently accepted.
 
 Input references use an object containing only `$ref`:
 
@@ -79,7 +79,7 @@ Input references use an object containing only `$ref`:
 {"previous": {"$ref": "prepare.output"}}
 ```
 
-The referenced task must be upstream in the chain. `{"$ref":"run.input"}` refers to the complete run input. References may appear inside nested objects or arrays. The worker resolves them from stored run input and successful upstream outputs, saving resolved input on the attempt. Field-path references such as `prepare.output.message` are not supported yet.
+The referenced task must be a dependency ancestor, reachable through one or more parent links. Sibling or unrelated task references are invalid even if that task appears earlier in the array. `{"$ref":"run.input"}` refers to the complete run input. References may appear inside nested objects or arrays. The worker resolves them from stored run input and successful upstream outputs, saving resolved input on the attempt. Field-path references such as `prepare.output.message` are not supported yet.
 
 The response contains `id`, `name`, `version`, normalized `tasks`, and `createdAt`. The UUID identifies this particular version. The same name can have another version with a different UUID; existing versions are preserved. Repeating the example with the same name and version returns **409 Conflict**. Reuse its saved ID or change the name/version for another definition.
 
@@ -108,7 +108,7 @@ The body is optional. Omit it or send `{}` for empty run input. A supplied `inpu
 In one transaction, this request saves:
 
 1. A new workflow run in `QUEUED` state, pinned to the selected definition version.
-2. Task runs with separate UUIDs: the root is `READY`, and dependent tasks are `PENDING`.
+2. Task runs with separate UUIDs: every root is `READY`, and dependent tasks are `PENDING`.
 3. Initial execution events for the run and every task.
 
 If any write fails, all these writes roll back together. No attempt is created before actual execution. Every accepted POST creates a separate run; request idempotency keys arrive in a later feature.

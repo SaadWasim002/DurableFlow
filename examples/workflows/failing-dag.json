@@ -1,0 +1,13 @@
+{
+  "name": "failing-dag-demo",
+  "version": 1,
+  "tasks": [
+    { "id": "root", "type": "echo" },
+    {
+      "id": "left", "type": "fail", "dependsOn": ["root"],
+      "input": { "message": "Left branch failed" }
+    },
+    { "id": "right", "type": "echo", "dependsOn": ["root"] },
+    { "id": "join", "type": "echo", "dependsOn": ["left", "right"] }
+  ]
+}

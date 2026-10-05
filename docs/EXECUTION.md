@@ -1,15 +1,15 @@
 # Sequential execution walkthrough
 
-DurableFlow now executes a linear workflow in the background. One application contains the HTTP API, a database polling loop, and one worker. PostgreSQL stores the complete execution state. Kafka is introduced in a later feature.
+DurableFlow now executes a workflow with DAG dependencies in the background. One application contains the HTTP API, a database polling loop, and one worker. PostgreSQL stores the complete execution state. Kafka is introduced in a later feature.
 
 ## What happens after creating a run
 
 1. `POST /workflows/{id}/runs` commits a queued run, its task records, and initial history events. It returns HTTP 202 with the initial snapshot.
 2. The worker polls for a run containing a `READY` task, approximately every 250 ms while idle. It processes one task per poll; the delay starts after the previous task finishes.
-3. A short database transaction locks the run, checks that its dependency succeeded and no task in that run is already running, and creates attempt 1. The run/task become `RUNNING`. PostgreSQL `FOR UPDATE SKIP LOCKED` prevents competing claims from taking the same run. The transaction commits before the handler executes.
+3. A short database transaction locks the run, checks that all its dependencies succeeded and no task in that run is already running, and creates attempt 1. The run/task become `RUNNING`. PostgreSQL `FOR UPDATE SKIP LOCKED` prevents competing claims from taking the same run. The transaction commits before the handler executes.
 4. The handler receives resolved input. References read this run's stored input and successful upstream outputs. Literal data containing `$ref` is preserved without being interpreted again.
 5. Another transaction locks the run and verifies that this task and attempt are still running. It saves the outcome and history together. Repeating a completion cannot replace a terminal result.
-6. Success makes the next dependent task `READY`. When every task succeeds, the run becomes `SUCCEEDED`. Failure marks the task/attempt `FAILED`, skips unstarted tasks, and marks the run `FAILED`.
+6. Success makes any pending task whose parents have all succeeded `READY`. When every task succeeds, the run becomes `SUCCEEDED`. Failure marks the task/attempt `FAILED`, skips unstarted tasks, and marks the run `FAILED`.
 
 ```mermaid
 flowchart LR

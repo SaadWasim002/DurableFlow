@@ -2,7 +2,7 @@
 
 A workflow execution engine built incrementally with Java and Spring Boot.
 
-DurableFlow creates and executes validated linear workflows using one background worker. Local PostgreSQL stores definitions, runs, task outputs, attempts, and transition history. REST APIs let you submit work and inspect its saved results.
+DurableFlow creates and executes validated workflows with branches, multiple roots, and joins using one background worker. Local PostgreSQL stores definitions, runs, task outputs, attempts, and transition history. REST APIs let you submit work and inspect its saved results.
 
 ## Requirements
 
@@ -65,6 +65,8 @@ Follow the [complete API walkthrough](docs/API.md) for requests, response fields
 
 Import the [Postman collection](examples/postman/DurableFlow.postman_collection.json) to try every endpoint with automatically saved IDs. The walkthrough also includes [curl commands](docs/API.md#curl-commands-powershell).
 
+The [DAG beginner walkthrough](docs/DAG.md) explains branches and joins using a runnable [diamond example](examples/workflows/diamond-dag.json). Tasks still execute one at a time.
+
 ## Build and run the JAR
 
 ```powershell
@@ -74,11 +76,11 @@ java -jar target/durableflow-0.0.1-SNAPSHOT.jar
 
 `verify` runs unit and integration tests and packages the application. Integration tests use Testcontainers to create isolated PostgreSQL 17 containers with random host ports, apply the real migrations, and remove the test containers afterward. Docker must be running; the Compose development database does not need to be running for tests. Test data is kept separate from your development database.
 
-The 65 tests cover graph/reference validation, UTC connections, migrations, saved results, uniqueness, HTTP responses, concurrent requests/claims, actual background execution, resolved attempt inputs, stop-on-failure, duplicate outcome protection, and transaction rollback. Starting the JAR requires the Compose database to be running.
+The 79 tests cover DAG/reference validation, UTC connections, migrations, saved results, uniqueness, HTTP responses, concurrent requests/claims, actual background execution, resolved attempt inputs, stop-on-failure, duplicate outcome protection, and transaction rollback. Starting the JAR requires the Compose database to be running.
 
 ## Execution behaviour
 
-The worker executes one task at a time, polling PostgreSQL with a default 250 ms delay after each task/poll. A successful task makes its successor ready. A failed task stops the run and marks unstarted tasks `SKIPPED`. The built-in handlers are `echo` (return input), `sleep` (wait `millis`, default 1000, maximum 60000), and `fail` (record a deliberate error). Input references are resolved from saved run input and successful upstream outputs.
+The worker executes one task at a time, polling PostgreSQL with a default 250 ms delay after each task/poll. A task becomes ready only after every parent succeeds. A failed task stops the run and marks unstarted tasks `SKIPPED`. The built-in handlers are `echo` (return input), `sleep` (wait `millis`, default 1000, maximum 60000), and `fail` (record a deliberate error). Input references are resolved from saved run input and successful upstream outputs.
 
 Set `EXECUTION_ENABLED=false` to run the API without executing tasks. `EXECUTION_POLL_DELAY_MS` changes the polling delay. Use one enabled application instance for this feature. Queued/ready work resumes after restart; interrupted `RUNNING` attempts require the lease recovery feature planned later. See [execution details and configuration](docs/EXECUTION.md).
 
@@ -117,7 +119,7 @@ Use your configured username/database if you override the defaults.
 | `task_attempts` | Separate execution attempts, including output and errors |
 | `execution_events` | Status-change history linked to the correct run/task/attempt |
 
-UUIDs identify records; timestamps use `TIMESTAMPTZ`. The application sets its default timezone to UTC before Spring Boot starts. The schema enforces valid states, positive attempt/version numbers, and unique task keys/attempt numbers. The API validates linear graphs and input references. Task claims and outcomes save state transitions and history in short transactions; handlers execute outside those transactions. V2 adds indexes for polling active work.
+UUIDs identify records; timestamps use `TIMESTAMPTZ`. The application sets its default timezone to UTC before Spring Boot starts. The schema enforces valid states, positive attempt/version numbers, and unique task keys/attempt numbers. The API validates DAGs and input references. Task claims and outcomes save state transitions and history in short transactions; handlers execute outside those transactions. V2 adds indexes for polling active work.
 
 Flyway is the only schema initialization mechanism. Add new `V3__...sql`, `V4__...sql` migrations for future changes; do not edit a migration after it has been applied to a database you intend to keep. Flyway validates migration checksums during startup.
 
@@ -143,8 +145,9 @@ examples/workflows/                          Example workflow JSON
 examples/postman/                            Importable Postman collection
 docs/API.md                                 API contract and walkthrough
 docs/EXECUTION.md                           Execution flow and success/failure demos
+docs/DAG.md                                 Beginner guide to branching dependencies
 ```
 
-Import `pom.xml` into your Java IDE and use `DurableFlowApplication` as the run configuration. General DAG dependencies and parallel execution are the next milestones.
+Import `pom.xml` into your Java IDE and use `DurableFlowApplication` as the run configuration. Parallel execution is the next milestone.
 
 Each feature uses a descriptive branch such as `feat/project-setup`, with a handful of focused commits. Development and verification run locally.
