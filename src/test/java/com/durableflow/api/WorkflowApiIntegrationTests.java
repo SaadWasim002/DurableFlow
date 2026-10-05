@@ -171,7 +171,23 @@ class WorkflowApiIntegrationTests {
                 "{\"name\":\"demo\",\"version\":1,\"tasks\":[{\"id\":\"a\",\"type\":\"unknown\"}]}",
                 "{\"name\":\"demo\",\"version\":1,\"tasks\":[{\"id\":\"a\",\"type\":\"echo\",\"depends_on\":[]}]}",
                 "{\"name\":\"demo\",\"version\":1,\"tasks\":[{\"id\":\"a\",\"type\":\"echo\",\"dependsOn\":[\"b\"]},{\"id\":\"b\",\"type\":\"echo\",\"dependsOn\":[\"a\"]}]}",
-                "not json");
+                "not json",
+                """
+                {"name":"duplicate-parent","version":1,"tasks":[
+                  {"id":"a","type":"echo"},{"id":"b","type":"echo","dependsOn":["a","a"]}]}
+                """,
+                """
+                {"name":"sibling-reference","version":1,"tasks":[
+                  {"id":"root","type":"echo"},
+                  {"id":"left","type":"echo","dependsOn":["root"]},
+                  {"id":"right","type":"echo","dependsOn":["root"],"input":{"$ref":"left.output"}}]}
+                """,
+                """
+                {"name":"hidden-cycle","version":1,"tasks":[
+                  {"id":"root","type":"echo"},
+                  {"id":"a","type":"echo","dependsOn":["b"]},
+                  {"id":"b","type":"echo","dependsOn":["a"]}]}
+                """);
     }
 
     @ParameterizedTest

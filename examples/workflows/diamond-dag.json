@@ -1,0 +1,23 @@
+{
+  "name": "diamond-demo",
+  "version": 1,
+  "tasks": [
+    { "id": "root", "type": "echo", "input": { "$ref": "run.input" } },
+    {
+      "id": "left", "type": "echo", "dependsOn": ["root"],
+      "input": { "branch": "left", "source": { "$ref": "root.output" } }
+    },
+    {
+      "id": "right", "type": "echo", "dependsOn": ["root"],
+      "input": { "branch": "right", "source": { "$ref": "root.output" } }
+    },
+    {
+      "id": "join", "type": "echo", "dependsOn": ["left", "right"],
+      "input": {
+        "left": { "$ref": "left.output" },
+        "right": { "$ref": "right.output" },
+        "original": { "$ref": "root.output" }
+      }
+    }
+  ]
+}

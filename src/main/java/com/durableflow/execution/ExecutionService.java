@@ -3,6 +3,7 @@ package com.durableflow.execution;
 import java.util.HashMap;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,17 +40,15 @@ public class ExecutionService {
         if (tasks.stream().anyMatch(t -> t.status().equals("RUNNING"))) {
             return Optional.empty();
         }
-        var next = tasks.stream().filter(t -> t.status().equals("READY")).findFirst();
+        var outputs = new HashMap<String, Object>();
+        tasks.stream().filter(t -> t.status().equals("SUCCEEDED"))
+                .forEach(t -> outputs.put(t.taskKey(), t.output()));
+        var next = tasks.stream().filter(t -> t.status().equals("READY")
+                && outputs.keySet().containsAll(t.dependsOn())).findFirst();
         if (next.isEmpty()) {
             return Optional.empty();
         }
         TaskResponse task = next.get();
-        var outputs = new HashMap<String, Object>();
-        tasks.stream().filter(t -> t.status().equals("SUCCEEDED"))
-                .forEach(t -> outputs.put(t.taskKey(), t.output()));
-        if (!outputs.keySet().containsAll(task.dependsOn())) {
-            return Optional.empty();
-        }
         var claimed = new ClaimedTask(runId, task.id(), UUID.randomUUID(), task.taskKey(), task.type(),
                 inputs.resolve(task.input(), run.input(), outputs));
         if (run.status().equals("QUEUED")) {
@@ -66,7 +65,10 @@ public class ExecutionService {
         }
         execution.finishTask(task, output, null, null);
         var tasks = workflows.findTasks(task.runId());
-        tasks.stream().filter(t -> t.status().equals("PENDING") && t.dependsOn().contains(task.taskKey()))
+        var succeeded = tasks.stream().filter(t -> t.status().equals("SUCCEEDED"))
+                .map(TaskResponse::taskKey).collect(Collectors.toSet());
+        // A join becomes ready only after every declared parent has succeeded.
+        tasks.stream().filter(t -> t.status().equals("PENDING") && succeeded.containsAll(t.dependsOn()))
                 .forEach(t -> execution.readyTask(task.runId(), t.id()));
         if (tasks.stream().allMatch(t -> t.status().equals("SUCCEEDED"))) {
             execution.finishRun(task.runId(), "SUCCEEDED");

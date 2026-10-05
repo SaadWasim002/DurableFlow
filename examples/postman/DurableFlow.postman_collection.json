@@ -2,7 +2,7 @@
   "info": {
     "name": "DurableFlow — Local API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Start local PostgreSQL and DurableFlow, then run requests in order. Successful responses save IDs automatically. Workflow names are unique. The worker executes tasks asynchronously; repeat Get run until SUCCEEDED or FAILED, then inspect attempts. The failure demo saves separate IDs. No authentication required."
+    "description": "Start local PostgreSQL and DurableFlow, then run requests in order. Successful responses save IDs automatically. Workflow names are unique. The worker executes tasks asynchronously; repeat Get run until SUCCEEDED or FAILED, then inspect attempts. The failure demo saves separate IDs. No authentication required. DAG folders demonstrate branching dependencies with one sequential worker. A join waits for every parent to succeed."
   },
   "variable": [
     {
@@ -37,6 +37,36 @@
     },
     {
       "key": "failureTaskId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "dagWorkflowId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "dagRunId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "dagTaskId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "dagFailureWorkflowId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "dagFailureRunId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "dagFailureTaskId",
       "value": "",
       "type": "string"
     }
@@ -397,6 +427,306 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/tasks/{{failureTaskId}}/attempts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DAG walkthrough",
+      "description": "root -> [left, right] -> join. Run requests in order and repeat Get DAG run until SUCCEEDED. The join attempt shows resolved branch outputs.",
+      "item": [
+        {
+          "name": "Create DAG workflow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/workflows",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"diamond-demo-{{$guid}}\",\n  \"version\": 1,\n  \"tasks\": [\n    {\n      \"id\": \"root\",\n      \"type\": \"echo\",\n      \"input\": {\n        \"$ref\": \"run.input\"\n      }\n    },\n    {\n      \"id\": \"left\",\n      \"type\": \"echo\",\n      \"dependsOn\": [\n        \"root\"\n      ],\n      \"input\": {\n        \"branch\": \"left\",\n        \"source\": {\n          \"$ref\": \"root.output\"\n        }\n      }\n    },\n    {\n      \"id\": \"right\",\n      \"type\": \"echo\",\n      \"dependsOn\": [\n        \"root\"\n      ],\n      \"input\": {\n        \"branch\": \"right\",\n        \"source\": {\n          \"$ref\": \"root.output\"\n        }\n      }\n    },\n    {\n      \"id\": \"join\",\n      \"type\": \"echo\",\n      \"dependsOn\": [\n        \"left\",\n        \"right\"\n      ],\n      \"input\": {\n        \"left\": {\n          \"$ref\": \"left.output\"\n        },\n        \"right\": {\n          \"$ref\": \"right.output\"\n        },\n        \"original\": {\n          \"$ref\": \"root.output\"\n        }\n      }\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set(\"dagWorkflowId\", pm.response.json().id);",
+                  "    pm.collectionVariables.unset(\"dagRunId\");",
+                  "    pm.collectionVariables.unset(\"dagTaskId\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get DAG workflow",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/workflows/{{dagWorkflowId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create DAG run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/workflows/{{dagWorkflowId}}/runs",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input\": {\n    \"reportName\": \"demo\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 202\", function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "if (pm.response.code === 202) {",
+                  "    const run = pm.response.json();",
+                  "    pm.collectionVariables.set(\"dagRunId\", run.id);",
+                  "    const task = run.tasks.find(item => item.taskKey === \"join\");",
+                  "    if (task) pm.collectionVariables.set(\"dagTaskId\", task.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get DAG run",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/runs/{{dagRunId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get DAG tasks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/runs/{{dagRunId}}/tasks"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get join attempts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{dagTaskId}}/attempts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DAG failure walkthrough",
+      "description": "The left branch fails; the ready right branch and pending join are skipped. Repeat Get failed DAG run until FAILED.",
+      "item": [
+        {
+          "name": "Create failing DAG workflow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/workflows",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"failing-dag-demo-{{$guid}}\",\n  \"version\": 1,\n  \"tasks\": [\n    {\n      \"id\": \"root\",\n      \"type\": \"echo\"\n    },\n    {\n      \"id\": \"left\",\n      \"type\": \"fail\",\n      \"dependsOn\": [\n        \"root\"\n      ],\n      \"input\": {\n        \"message\": \"Left branch failed\"\n      }\n    },\n    {\n      \"id\": \"right\",\n      \"type\": \"echo\",\n      \"dependsOn\": [\n        \"root\"\n      ]\n    },\n    {\n      \"id\": \"join\",\n      \"type\": \"echo\",\n      \"dependsOn\": [\n        \"left\",\n        \"right\"\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set(\"dagFailureWorkflowId\", pm.response.json().id);",
+                  "    pm.collectionVariables.unset(\"dagFailureRunId\");",
+                  "    pm.collectionVariables.unset(\"dagFailureTaskId\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create failing DAG run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/workflows/{{dagFailureWorkflowId}}/runs",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 202\", function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "if (pm.response.code === 202) {",
+                  "    const run = pm.response.json();",
+                  "    pm.collectionVariables.set(\"dagFailureRunId\", run.id);",
+                  "    const task = run.tasks.find(item => item.taskKey === \"left\");",
+                  "    if (task) pm.collectionVariables.set(\"dagFailureTaskId\", task.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get failed DAG run",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/runs/{{dagFailureRunId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get failed branch attempts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/tasks/{{dagFailureTaskId}}/attempts"
           },
           "event": [
             {

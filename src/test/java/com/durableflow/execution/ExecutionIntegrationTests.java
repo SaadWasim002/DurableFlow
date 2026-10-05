@@ -202,6 +202,105 @@ class ExecutionIntegrationTests {
         assertThat(workflows.getAttempts(run.tasks().getLast().id())).isEmpty();
     }
 
+    @Test
+    void diamondJoinWaitsForBothBranchesAndReceivesBothOutputs() throws Exception {
+        var run = createRun(diamond());
+        var root = execution.claimNext().orElseThrow();
+        execution.succeed(root, handlers.execute(root.type(), root.input()));
+        assertThat(workflows.getTasks(run.id())).extracting(TaskResponse::status)
+                .containsExactly("SUCCEEDED", "READY", "READY", "PENDING");
+        var left = execution.claimNext().orElseThrow();
+        assertThat(left.taskKey()).isEqualTo("left");
+        execution.succeed(left, handlers.execute(left.type(), left.input()));
+        assertThat(workflows.getTasks(run.id()).getLast().status()).isEqualTo("PENDING");
+        assertThat(workflows.getAttempts(run.tasks().getLast().id())).isEmpty();
+        var right = execution.claimNext().orElseThrow();
+        assertThat(right.taskKey()).isEqualTo("right");
+        execution.succeed(right, handlers.execute(right.type(), right.input()));
+        assertThat(workflows.getTasks(run.id()).getLast().status()).isEqualTo("READY");
+        var join = execution.claimNext().orElseThrow();
+        assertThat(join.taskKey()).isEqualTo("join");
+        assertThat(join.input()).containsEntry("left", Map.of("side", "left"))
+                .containsEntry("right", Map.of("side", "right"));
+        execution.succeed(join, handlers.execute(join.type(), join.input()));
+        var finished = workflows.getRun(run.id());
+        assertThat(finished.status()).isEqualTo("SUCCEEDED");
+        assertThat(finished.tasks()).extracting(TaskResponse::status).containsOnly("SUCCEEDED");
+        assertThat(eventCount(run.id())).isEqualTo(18);
+        assertThat(execution.claimNext()).isEmpty();
+    }
+
+    @Test
+    void initializesMultipleRootsAndFinishesOnlyAfterEveryComponentSucceeds() {
+        var run = createRun(List.of(task("a", "echo", List.of(), Map.of()),
+                task("b", "echo", List.of(), Map.of()), task("join", "echo", List.of("a", "b"), Map.of()),
+                task("independent", "echo", List.of(), Map.of())));
+        assertThat(run.tasks()).extracting(TaskResponse::status).containsExactly("READY", "READY", "READY", "PENDING");
+        execution.succeed(execution.claimNext().orElseThrow(), Map.of());
+        execution.succeed(execution.claimNext().orElseThrow(), Map.of());
+        assertThat(workflows.getRun(run.id()).status()).isEqualTo("RUNNING");
+        assertThat(workflows.getTasks(run.id()).getLast().status()).isEqualTo("READY");
+        var independent = execution.claimNext().orElseThrow();
+        assertThat(independent.taskKey()).isEqualTo("independent");
+        execution.succeed(independent, Map.of());
+        assertThat(workflows.getRun(run.id()).status()).isEqualTo("RUNNING");
+        execution.succeed(execution.claimNext().orElseThrow(), Map.of());
+        assertThat(workflows.getRun(run.id()).status()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void branchFailureSkipsTheOtherWaitingBranchAndJoinUnderStopPolicy() {
+        var run = createRun(diamond());
+        execution.succeed(execution.claimNext().orElseThrow(), Map.of());
+        execution.fail(execution.claimNext().orElseThrow(), "DEMO_FAILURE", "Branch failed");
+        var failed = workflows.getRun(run.id());
+        assertThat(failed.status()).isEqualTo("FAILED");
+        assertThat(failed.tasks()).extracting(TaskResponse::status)
+                .containsExactly("SUCCEEDED", "FAILED", "SKIPPED", "SKIPPED");
+        assertThat(workflows.getAttempts(failed.tasks().get(2).id())).isEmpty();
+        assertThat(workflows.getAttempts(failed.tasks().get(3).id())).isEmpty();
+    }
+
+    @Test
+    void rollsBackBranchSuccessIfRecordingJoinReadinessFails() {
+        var run = createRun(diamond());
+        execution.succeed(execution.claimNext().orElseThrow(), Map.of());
+        execution.succeed(execution.claimNext().orElseThrow(), Map.of("side", "left"));
+        var right = execution.claimNext().orElseThrow();
+        long before = eventCount(run.id());
+        jdbc.execute("""
+                CREATE FUNCTION reject_join_ready() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    IF NEW.from_status = 'PENDING' AND NEW.to_status = 'READY' THEN
+                        RAISE EXCEPTION 'Test join readiness failure';
+                    END IF;
+                    RETURN NEW;
+                END; $$;
+                CREATE TRIGGER reject_join_ready BEFORE INSERT ON execution_events
+                    FOR EACH ROW EXECUTE FUNCTION reject_join_ready();
+                """);
+        try {
+            assertThatThrownBy(() -> execution.succeed(right, Map.of("side", "right")))
+                    .isInstanceOf(DataAccessException.class);
+            assertThat(workflows.getTasks(run.id())).extracting(TaskResponse::status)
+                    .containsExactly("SUCCEEDED", "SUCCEEDED", "RUNNING", "PENDING");
+            assertThat(workflows.getAttempts(right.taskId()).getFirst().status()).isEqualTo("RUNNING");
+            assertThat(eventCount(run.id())).isEqualTo(before);
+        } finally {
+            jdbc.execute("DROP TRIGGER reject_join_ready ON execution_events; DROP FUNCTION reject_join_ready();");
+        }
+        assertThat(execution.succeed(right, Map.of("side", "right"))).isTrue();
+        assertThat(workflows.getTasks(run.id()).getLast().status()).isEqualTo("READY");
+    }
+
+    private static List<TaskDefinition> diamond() {
+        return List.of(task("root", "echo", List.of(), Map.of()),
+                task("left", "echo", List.of("root"), Map.of("side", "left")),
+                task("right", "echo", List.of("root"), Map.of("side", "right")),
+                task("join", "echo", List.of("left", "right"),
+                        Map.of("left", Map.of("$ref", "left.output"), "right", Map.of("$ref", "right.output"))));
+    }
+
     private RunResponse createRun(List<TaskDefinition> tasks) {
         var definition = workflows.createWorkflow(new CreateWorkflowRequest("execution-" + UUID.randomUUID(), 1, tasks));
         return workflows.createRun(definition.id(), new CreateRunRequest(Map.of("report", "demo")));

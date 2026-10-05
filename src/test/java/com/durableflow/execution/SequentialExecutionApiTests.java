@@ -106,6 +106,41 @@ class SequentialExecutionApiTests {
         assertThat(attempts[0].errorType()).isEqualTo("INVALID_INPUT");
     }
 
+    @Test
+    void executesAnUnorderedDagAndJoinsSavedBranchOutputsThroughHttp() throws Exception {
+        var created = submit(List.of(
+                task("join", "echo", List.of("left", "right"), Map.of(
+                        "left", Map.of("$ref", "left.output"), "right", Map.of("$ref", "right.output"),
+                        "original", Map.of("$ref", "root.output"))),
+                task("left", "echo", List.of("root"), Map.of("value", "left")),
+                task("root", "echo", List.of(), Map.of("$ref", "run.input")),
+                task("right", "sleep", List.of("root"), Map.of("millis", 0, "value", "right"))));
+        assertThat(created.tasks()).extracting(TaskResponse::taskKey).containsExactly("root", "left", "right", "join");
+        var run = awaitFinished(created.id());
+        assertThat(run.status()).isEqualTo("SUCCEEDED");
+        var join = run.tasks().getLast();
+        assertThat(join.output()).isEqualTo(Map.of("left", Map.of("value", "left"),
+                "right", Map.of("millis", 0, "value", "right"), "original", Map.of("report", "demo")));
+        assertThat(join.startedAt()).isAfterOrEqualTo(run.tasks().get(1).finishedAt());
+        assertThat(join.startedAt()).isAfterOrEqualTo(run.tasks().get(2).finishedAt());
+        var attempts = json.readValue(send("GET", "/tasks/" + join.id() + "/attempts", null, 200), AttemptResponse[].class);
+        assertThat(attempts).hasSize(1);
+        assertThat(attempts[0].input()).isEqualTo(join.output());
+    }
+
+    @Test
+    void failingDagBranchStopsTheRunAndLeavesTheJoinUnstarted() throws Exception {
+        var created = submit(List.of(task("root", "echo", List.of(), Map.of()),
+                task("left", "fail", List.of("root"), Map.of("message", "Left branch failed")),
+                task("right", "echo", List.of("root"), Map.of()),
+                task("join", "echo", List.of("left", "right"), Map.of())));
+        var run = awaitFinished(created.id());
+        assertThat(run.status()).isEqualTo("FAILED");
+        assertThat(run.tasks()).extracting(TaskResponse::status).containsExactly("SUCCEEDED", "FAILED", "SKIPPED", "SKIPPED");
+        assertThat(send("GET", "/tasks/" + run.tasks().getLast().id() + "/attempts", null, 200)).isEqualTo("[]");
+        assertThat(run.tasks().getLast().startedAt()).isNull();
+    }
+
     private RunResponse submit(List<TaskDefinition> tasks) throws Exception {
         var definition = json.readValue(send("POST", "/workflows",
                 new CreateWorkflowRequest("worker-api-" + UUID.randomUUID(), 1, tasks), 201), WorkflowResponse.class);

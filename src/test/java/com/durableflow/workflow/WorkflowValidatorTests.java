@@ -38,11 +38,47 @@ class WorkflowValidatorTests {
                 List.of(task("a", "missing")),
                 List.of(task("a", "a")),
                 List.of(task("a", "b"), task("b", "a")),
-                List.of(task("a"), task("b")),
-                List.of(task("a"), task("b", "a"), task("c", "a")),
+                List.of(task("a"), task("b", "a", "a")),
                 List.of(task("a"), new TaskDefinition("b", "echo", List.of("a", "c"), Map.of())),
                 List.of(task("root"), task("a", "b"), task("b", "a")),
+                List.of(),
                 List.of(new TaskDefinition("a", "unknown", null, null)));
+    }
+
+    @Test
+    void ordersAnUnorderedDiamondBeforeItsJoin() {
+        var ordered = validator.validateAndOrder(List.of(task("join", "left", "right"),
+                task("left", "root"), task("root"), task("right", "root")));
+        assertThat(ordered).extracting(TaskDefinition::id).containsExactly("root", "left", "right", "join");
+    }
+
+    @Test
+    void acceptsMultipleRootsAndIndependentComponents() {
+        var ordered = validator.validateAndOrder(List.of(task("join", "a", "b"), task("a"),
+                task("b"), task("independent")));
+        assertThat(ordered).extracting(TaskDefinition::id).containsExactly("a", "b", "independent", "join");
+    }
+
+    @Test
+    void acceptsReferencesToBothParentsAndIndirectAncestors() {
+        var join = new TaskDefinition("join", "echo", List.of("left", "right"), Map.of("inputs", List.of(
+                Map.of("$ref", "left.output"), Map.of("$ref", "right.output"), Map.of("$ref", "root.output"))));
+        assertThat(validator.validateAndOrder(List.of(join, task("root"), task("left", "root"), task("right", "root"))))
+                .extracting(TaskDefinition::id).containsExactly("root", "left", "right", "join");
+    }
+
+    @Test
+    void rejectsSiblingReferencesEvenWhenTheSiblingAppearsEarlierInTheOrder() {
+        var right = new TaskDefinition("right", "echo", List.of("root"), Map.of("$ref", "left.output"));
+        assertThatThrownBy(() -> validator.validateAndOrder(List.of(task("root"), task("left", "root"), right)))
+                .isInstanceOf(InvalidWorkflow.class).hasMessageContaining("dependency ancestor");
+    }
+
+    @Test
+    void rejectsReferencesAcrossIndependentComponents() {
+        var independent = new TaskDefinition("b", "echo", List.of(), Map.of("$ref", "a.output"));
+        assertThatThrownBy(() -> validator.validateAndOrder(List.of(task("a"), independent)))
+                .isInstanceOf(InvalidWorkflow.class).hasMessageContaining("dependency ancestor");
     }
 
     @ParameterizedTest
